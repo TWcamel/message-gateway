@@ -1,0 +1,169 @@
+version: "3.9"
+
+networks:
+  mnp-net:
+    driver: bridge
+
+services:
+  # ──────────────────────────────────────────────────────────────
+  # GCP Pub/Sub Emulator
+  # ──────────────────────────────────────────────────────────────
+  pubsub-emulator:
+    image: google/cloud-pubsub-emulator:latest
+    container_name: pubsub-emulator
+    networks: [mnp-net]
+    ports:
+      - "8085:8085"
+    environment:
+      PUBSUB_PROJECT: emulator
+    command: ["gcloud", "beta", "emulators", "pubsub", "start",
+              "--project=emulator",
+              "--host-port=0.0.0.0:8085",
+              "--data-dir=/data"]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "8085"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  # Init container creates topic + subscription BEFORE other services read them.
+  pubsub-init:
+    image: google/cloud-sdk:alpine
+    depends_on:
+      pubsub-emulator:
+        condition: service_healthy
+    networks: [mnp-net]
+    environment:
+      PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -euxo pipefail
+        echo "Creating topic: gcp-mnp-outbox"
+        gcloud pubsub topics create gcp-mnp-outbox \
+          --project=emulator \
+          --api-endpoint=http://pubsub-emulator:8085 \
+          --quiet || true
+        echo "Creating subscription: gcp-mnp-outbox-sub"
+        gcloud pubsub subscriptions create gcp-mnp-outbox-sub \
+          --topic=gcp-mnp-outbox \
+          --project=emulator \
+          --api-endpoint=http://pubsub-emulator:8085 \
+          --ack-deadline=30 \
+          --quiet || true
+        echo "Pub/Sub init done"
+
+  # ──────────────────────────────────────────────────────────────
+  # NATS servers (two isolated instances)
+  # ──────────────────────────────────────────────────────────────
+  nats-alpha:
+    image: nats:2.10-alpine
+    container_name: nats-alpha
+    networks: [mnp-net]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: ["--jetstream", "--http_port", "8222"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8222/healthz || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  nats-beta:
+    image: nats:2.10-alpine
+    container_name: nats-beta
+    networks: [mnp-net]
+    ports:
+      - "4223:4222"
+      - "8223:8222"
+    command: ["--jetstream", "--http_port", "8222"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8222/healthz || exit 1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+
+  # ──────────────────────────────────────────────────────────────
+  # Application services
+  # ──────────────────────────────────────────────────────────────
+  gcp-mnp:
+    build:
+      context: ./gcp-mnp
+      dockerfile: ../docker/gcp-mnp/Dockerfile
+    image: mnp/gcp-mnp:local
+    container_name: gcp-mnp
+    depends_on:
+      pubsub-init:
+        condition: service_completed_successfully
+    networks: [mnp-net]
+    ports:
+      - "8080:8080"
+    environment:
+      PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
+      PUBSUB_PROJECT: emulator
+      OUTBOX_TOPIC: gcp-mnp-outbox
+      OUTBOX_SUBSCRIPTION: gcp-mnp-outbox-sub
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8080/actuator/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  nats-adapter:
+    build:
+      context: ./nats-adapter
+      dockerfile: ../docker/nats-adapter/Dockerfile
+    image: mnp/nats-adapter:local
+    container_name: nats-adapter
+    depends_on:
+      pubsub-init:
+        condition: service_completed_successfully
+      nats-alpha:
+        condition: service_healthy
+      nats-beta:
+        condition: service_healthy
+    networks: [mnp-net]
+    ports:
+      - "8081:8081"
+    environment:
+      PUBSUB_EMULATOR_HOST: pubsub-emulator:8085
+      PUBSUB_PROJECT: emulator
+      INBOX_TOPIC: gcp-mnp-outbox
+      INBOX_SUBSCRIPTION: gcp-mnp-outbox-sub
+      NATS_ALPHA_HOST: nats-alpha
+      NATS_BETA_HOST: nats-beta
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8081/actuator/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+
+  nats-consumer:
+    build:
+      context: ./nats-consumer
+      dockerfile: ../docker/nats-consumer/Dockerfile
+    image: mnp/nats-consumer:local
+    container_name: nats-consumer
+    depends_on:
+      nats-alpha:
+        condition: service_healthy
+      nats-beta:
+        condition: service_healthy
+    networks: [mnp-net]
+    ports:
+      - "8082:8082"
+    environment:
+      NATS_ALPHA_HOST: nats-alpha
+      NATS_BETA_HOST: nats-beta
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:8082/actuator/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 40s

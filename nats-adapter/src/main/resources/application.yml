@@ -1,0 +1,43 @@
+server:
+  port: 8081
+
+spring:
+  application:
+    name: nats-adapter
+  cloud:
+    gcp:
+      project-id: ${PUBSUB_PROJECT:emulator}
+      pubsub:
+        emulator-host: ${PUBSUB_EMULATOR_HOST:localhost:8085}
+  main:
+    lazy-initialization: false
+
+mnp:
+  pubsub:
+    inbox-topic: ${INBOX_TOPIC:gcp-mnp-outbox}
+    inbox-subscription: ${INBOX_SUBSCRIPTION:gcp-mnp-outbox-sub}
+  nats:
+    servers:
+      - name: alpha
+        urls:
+          - "nats://${NATS_ALPHA_HOST:nats-alpha}:4222"
+        inbox-subject: "mnp.alpha.inbox"
+        outbox-subject: "mnp.alpha.outbox"
+      - name: beta
+        urls:
+          - "nats://${NATS_BETA_HOST:nats-beta}:4222"
+        inbox-subject: "mnp.beta.inbox"
+        outbox-subject: "mnp.beta.outbox"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    com.mnp: DEBUG
+    com.google.cloud: WARN
+    io.grpc: WARN
+    io.nats: INFO

@@ -1,0 +1,4 @@
+com/mnp/natsconsumer/NatsConsumerApplication.class
+com/mnp/natsconsumer/consumer/InboxSubscriber.class
+com/mnp/natsconsumer/config/NatsConnectionProperties.class
+com/mnp/natsconsumer/config/NatsConnectionProperties$ServerSpec.class

@@ -1,0 +1,34 @@
+server:
+  port: 8080
+  error:
+    include-message: always
+
+spring:
+  application:
+    name: gcp-mnp
+  cloud:
+    gcp:
+      project-id: ${PUBSUB_PROJECT:emulator}
+      pubsub:
+        emulator-host: ${PUBSUB_EMULATOR_HOST:localhost:8085}
+        publisher:
+          enable-publish-retry: true
+  main:
+    lazy-initialization: false
+
+mnp:
+  pubsub:
+    outbox-topic: ${OUTBOX_TOPIC:gcp-mnp-outbox}
+    outbox-subscription: ${OUTBOX_SUBSCRIPTION:gcp-mnp-outbox-sub}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    com.mnp: DEBUG
+    com.google.cloud: WARN
+    io.grpc: WARN

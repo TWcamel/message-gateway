@@ -1,0 +1,33 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: nats-consumer
+  main:
+    lazy-initialization: false
+
+mnp:
+  nats:
+    servers:
+      - name: alpha
+        urls:
+          - "nats://${NATS_ALPHA_HOST:nats-alpha}:4222"
+        inbox-subject: "mnp.alpha.inbox"
+        outbox-subject: "mnp.alpha.outbox"
+      - name: beta
+        urls:
+          - "nats://${NATS_BETA_HOST:nats-beta}:4222"
+        inbox-subject: "mnp.beta.inbox"
+        outbox-subject: "mnp.beta.outbox"
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+logging:
+  level:
+    com.mnp: DEBUG
+    io.nats: INFO
